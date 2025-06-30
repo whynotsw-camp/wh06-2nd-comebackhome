@@ -1,0 +1,17 @@
+# Core App Framework
+streamlit
+
+# Data Handling
+pandas
+
+# Visualization
+plotly
+
+# YouTube API Integration
+google-api-python-client
+
+# For loading environment variables (.env file)
+python-dotenv
+
+sentence-transformers
+scikit-learn

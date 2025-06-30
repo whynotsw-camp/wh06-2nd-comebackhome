@@ -193,6 +193,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-users.json
+
 active_users.json
 firebase.json
+firebase_config.py
