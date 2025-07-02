@@ -17,28 +17,32 @@ if not firebase_admin._apps:
 
 firestore_db = firestore.client()
 
-def log_dwell_time_to_firebase(session):
-    view_data = session.get("view_start_time")  # dict 타입
-    search_id = session.get("current_search_id")
-    search_keyword = session.get("current_search_keyword")  # 검색어 (문자)
-    recipe_id = view_data.get("recipe_id") if view_data else None
-    recipe_name = session.get("selected_recipe_name")  # 레시피명 (문자)
+# --- Firebase 로그 저장 함수 (ERD 컬럼명에 맞게) ---
+def log_search_to_firebase(srch_id, srch_code, srch_keyword, nation_code):
+    now_korea = datetime.now(korea)
+    firestore_db.collection("SEARCH_LOG").add({
+        "SRCH_ID": srch_id,
+        "SRCH_CODE": srch_code,
+        "SRCH_KEYWORD": srch_keyword,
+        "NATION_CODE": nation_code,
+        "SRCH_TIME": now_korea
+    })
 
-    if isinstance(view_data, dict) and "time" in view_data and search_id:
-        view_time = view_data["time"]
-        if isinstance(view_time, datetime):
-            duration = (datetime.now() - view_time).total_seconds()
-            now_korea = datetime.now(korea)
+def log_recommend_to_firebase(rec_id, srch_id, recipe_id):
+    firestore_db.collection("RECOMMEND_LOG").add({
+        "REC_ID": rec_id,
+        "SRCH_ID": srch_id,
+        "RECIPE_ID": recipe_id
+    })
 
-            firestore_db.collection("dwell_logs").add({
-                "검색어_아이디": search_id,
-                "검색어_이름": search_keyword or "Unknown",
-                "레시피_아이디": recipe_id,
-                "레시피_이름": recipe_name or "Unknown",
-                "체류시간": f"{round(duration, 2)}초",
-                "검색시간": now_korea
-            })
-
+def log_dwell_to_firebase(view_id, srch_id, rec_id, start_time, dwell_time):
+    firestore_db.collection("DWELL_TIME_LOG").add({
+        "VIEW_ID": view_id,
+        "SRCH_ID": srch_id,
+        "REC_ID": rec_id,
+        "START_TIME": start_time,
+        "DWELL_TIME": dwell_time
+    })
 
 from database_setup import setup_database
 from search_logic import (
@@ -77,6 +81,19 @@ if 'calc_ingredients' not in st.session_state:
 st.title("🍳 AI 레시피 추천 및 분석 서비스")
 tab1, tab2, tab3 = st.tabs(["🔍 AI 레시피 추천", "📈 트렌드 분석", "🧮 영양성분 계산기"])
 
+def save_dwell_log_if_needed():
+    view_info = st.session_state.get('view_start_time')
+    if view_info and 'time' in view_info:
+        dwell_seconds = (datetime.now() - view_info['time']).total_seconds()
+        if dwell_seconds > 3:
+            view_id = None
+            srch_id = view_info['srch_id']
+            rec_id = None
+            start_time = view_info['time']
+            dwell_time = int(dwell_seconds)
+            log_dwell_to_firebase(view_id, srch_id, rec_id, start_time, dwell_time)
+    st.session_state.view_start_time = None
+
 # --- 탭 1: AI 레시피 추천 ---
 with tab1:
     col1, col2 = st.columns([0.4, 0.6])
@@ -110,10 +127,9 @@ with tab1:
             selected_type_code = type_options[selected_type_label]
 
         if st.button("검색", type="primary"):
-            log_dwell_time_to_firebase(st.session_state)
+            save_dwell_log_if_needed()  # 새 검색 시 이전 상세 체류 로그 저장
             if keyword:
                 st.session_state.current_search_keyword = keyword
-                log_dwell_time(st.session_state)
                 st.session_state.selected_recipe_id = None
                 st.session_state.youtube_videos = []
                 st.session_state.next_page_token = None
@@ -124,14 +140,8 @@ with tab1:
                 srch_id = log_search(srch_code, keyword, log_nation_code)
                 st.session_state.current_search_id = srch_id
 
-                    # ✅ Firebase에 검색 로그 저장
-                firestore_db.collection("search_logs").add({
-                    "키워드": keyword,
-                    "검색기준": search_by_label,
-                    "나라별 음식": selected_nation_label,
-                    "음식 종류": selected_type_label,
-                    "시간": datetime.now(korea)
-                    })
+                # ✅ Firebase에 검색 로그 저장 (ERD 컬럼명)
+                log_search_to_firebase(srch_id, srch_code, keyword, log_nation_code)
 
                 if is_recipe_search:
                     with st.spinner("AI가 레시피를 찾고 있습니다..."):
@@ -142,6 +152,10 @@ with tab1:
                         st.session_state.search_results = results
                     if not results.empty:
                         log_recommendations(srch_id, results)
+                        # ✅ Firebase에 추천 로그 저장 (ERD 컬럼명)
+                        for idx, row in results.iterrows():
+                            rec_id = None  # Firestore는 자동 증가 없음, 필요시 None 또는 row index 사용
+                            log_recommend_to_firebase(rec_id, srch_id, int(row['RECIPE_ID']))
                 else: # 키워드 영상 검색
                     st.session_state.youtube_query = keyword
                     with st.spinner("관련 영상을 찾는 중..."):
@@ -158,7 +172,7 @@ with tab1:
                 recipe_name = row['RECIPE_NM_KO']
                 score = f" (유사도: {row['유사도']:.2f})" if '유사도' in row else ""
                 if st.button(f"{recipe_name}{score}", key=f"recipe_{row['RECIPE_ID']}"):
-                    log_dwell_time(st.session_state)
+                    save_dwell_log_if_needed()  # 다른 레시피 클릭 시 이전 상세 체류 로그 저장
                     st.session_state.selected_recipe_name = recipe_name
                     if st.session_state.selected_recipe_id != row['RECIPE_ID']:
                         st.session_state.youtube_videos = []
