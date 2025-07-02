@@ -4,14 +4,6 @@ from datetime import datetime
 import plotly.express as px
 import pytz
 
-from dotenv import load_dotenv
-import os
-
-load_dotenv()  # .env 파일 읽기
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-
-
-
 # 한국 시간대 설정
 korea = pytz.timezone('Asia/Seoul')
 
@@ -20,7 +12,7 @@ from firebase_admin import credentials, firestore
 
 # 이미 초기화된 경우 건너뛰기
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase_key.json")
+    cred = credentials.Certificate("recipe-app-b1358-firebase-adminsdk-fbsvc-0f01344d78.json")
     firebase_admin.initialize_app(cred)
 
 firestore_db = firestore.client()
@@ -210,15 +202,10 @@ with tab1:
                     st.session_state.youtube_query = base['RECIPE_NM_KO']
                     
                     if not st.session_state.youtube_videos:
-                        with st.spinner("관련 영상을 찾는 중..."):
+                         with st.spinner("관련 영상을 찾는 중..."):
                             videos, token = get_youtube_videos(st.session_state.youtube_query, max_results=2)
                             st.session_state.youtube_videos = videos
                             st.session_state.next_page_token = token
-                        
-                        # YouTube API 키가 없거나 오류가 발생한 경우 안내 메시지 표시
-                        if not st.session_state.youtube_videos:
-                            st.warning("YouTube API 키가 설정되지 않았습니다. 관련 영상을 보려면 .env 파일에 YOUTUBE_API_KEY를 설정해주세요.")
-                            st.info("YouTube Data API v3 키는 https://console.cloud.google.com/apis/credentials 에서 생성할 수 있습니다.")
             except Exception as e:
                 st.error(f"상세 정보를 불러오는 중 오류가 발생했습니다: {e}")
                 st.session_state.selected_recipe_id = None
@@ -237,115 +224,61 @@ with tab1:
                         st.session_state.youtube_videos.extend(new_videos)
                         st.session_state.next_page_token = new_token
                     st.rerun()
-        elif st.session_state.youtube_query and not st.session_state.youtube_videos:
-            st.warning("YouTube API 키가 설정되지 않았습니다. 영상 검색 기능을 사용하려면 .env 파일에 YOUTUBE_API_KEY를 설정해주세요.")
-            st.info("YouTube Data API v3 키는 https://console.cloud.google.com/apis/credentials 에서 생성할 수 있습니다.")
 
         if not st.session_state.selected_recipe_id and not st.session_state.youtube_videos:
             st.info("왼쪽에서 검색 조건을 선택하고 검색어를 입력해주세요.")
 
 # --- 탭 2: 트렌드 분석 ---
 with tab2:
-    import plotly.express as px
-    import pandas as pd
-
+    # (탭2 코드는 변경 없음)
     st.header("📈 트렌드 데이터 분석")
     st.info("사용자 행동 로그를 기반으로 한 심층 분석입니다.")
-
-    # 🔹 Firestore에서 데이터프레임으로 가져오는 함수 정의
-    def get_collection_df(collection_name):
-        docs = firestore_db.collection(collection_name).stream()
-        data = [doc.to_dict() for doc in docs]
-        return pd.DataFrame(data)
-
-    # 🔹 데이터 로딩
-    df_search = get_collection_df("search_logs")
-    df_dwell = get_collection_df("dwell_logs")
-    df_recipe = get_collection_df("recipe_base")
-
+    
     col1, col2 = st.columns(2)
-
-    # -----------------------------
-    # 🔹 인기 검색 키워드
-    # -----------------------------
     with col1:
         st.subheader("인기 검색 키워드")
-        if not df_search.empty and "키워드" in df_search.columns:
-            top_keywords = df_search["키워드"].value_counts().nlargest(10).reset_index()
-            top_keywords.columns = ["키워드", "검색 수"]
-            fig1 = px.bar(top_keywords, x="키워드", y="검색 수", title="TOP 10 검색 키워드", text_auto=True)
+        q1 = "SELECT SRCH_KEYWORD, COUNT(*) as count FROM SEARCH_LOG GROUP BY SRCH_KEYWORD ORDER BY count DESC LIMIT 10"
+        df1 = db_query(q1)
+        if not df1.empty:
+            fig1 = px.bar(df1, x='SRCH_KEYWORD', y='count', title='TOP 10 검색 키워드', text_auto=True)
             st.plotly_chart(fig1, use_container_width=True)
         else:
             st.info("검색 기록이 없습니다.")
 
-    # -----------------------------
-    # 🔹 가장 많이 본 레시피
-    # -----------------------------
     with col2:
         st.subheader("가장 많이 본 레시피")
-        if not df_dwell.empty and not df_recipe.empty:
-            if "레시피_아이디" in df_dwell.columns and "RECIPE_ID" in df_recipe.columns:
-                merged = pd.merge(df_dwell, df_recipe, left_on="레시피_아이디", right_on="RECIPE_ID", how="left")
-                if "RECIPE_NM_KO" in merged.columns:
-                    top_recipes = merged["RECIPE_NM_KO"].value_counts().nlargest(10).reset_index()
-                    top_recipes.columns = ["레시피명", "조회 수"]
-                    fig2 = px.bar(top_recipes, x="레시피명", y="조회 수", title="TOP 10 조회수 레시피", text_auto=True)
-                    st.plotly_chart(fig2, use_container_width=True)
-                else:
-                    st.warning("병합 후 RECIPE_NM_KO 필드가 존재하지 않습니다.")
-            else:
-                st.warning("레시피 ID 컬럼이 누락되었습니다.")
+        q2 = """
+            SELECT r.RECIPE_NM_KO, COUNT(d.VIEW_ID) as view_count
+            FROM DWELL_TIME_LOG d
+            JOIN RECIPE_BASE r ON d.RECIPE_ID = r.RECIPE_ID
+            GROUP BY d.RECIPE_ID, r.RECIPE_NM_KO
+            ORDER BY view_count DESC LIMIT 10
+        """
+        df2 = db_query(q2)
+        if not df2.empty:
+            fig2 = px.bar(df2, x='RECIPE_NM_KO', y='view_count', title='TOP 10 조회수 레시피', text_auto=True)
+            st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("조회 기록이 없습니다.")
 
-    # -----------------------------
-    # 🔹 검색어별 평균 체류시간
-    # -----------------------------
     st.divider()
     st.subheader("검색어별 평균 레시피 체류시간")
-    if not df_search.empty and not df_dwell.empty:
-        try:
-            # ✅ '체류시간' 문자열 처리 → 숫자형 초
-            if "체류시간" in df_dwell.columns:
-                df_dwell = df_dwell[df_dwell["체류시간"].notnull()]
-                df_dwell["체류시간_초"] = df_dwell["체류시간"].str.replace("초", "").astype(float)
-                df_dwell = df_dwell[df_dwell["체류시간_초"] < 1800]  # 30분 이상 제거
-            else:
-                st.warning("체류시간 컬럼이 없습니다.")
-                df_dwell["체류시간_초"] = 0
-
-            # ✅ 병합 키: 검색어_이름 (from dwell) vs 키워드 (from search)
-            if "검색어_이름" in df_dwell.columns and "키워드" in df_search.columns:
-                merged = pd.merge(df_dwell, df_search, left_on="검색어_이름", right_on="키워드", how="inner")
-
-                group = merged.groupby("검색어_이름").agg(
-                    평균체류시간=("체류시간_초", "mean"),
-                    조회수=("레시피_아이디", "count")
-                ).reset_index()
-
-                group = group[group["조회수"] > 2].sort_values("평균체류시간", ascending=False).head(10)
-                group["평균체류시간"] = group["평균체류시간"].round(1)
-
-                fig3 = px.bar(
-                    group,
-                    x="검색어_이름",
-                    y="평균체류시간",
-                    title="검색어별 평균 체류시간 (단위: 초)",
-                    text_auto=True,
-                    labels={"평균체류시간": "평균 체류시간(초)"}
-                )
-                st.plotly_chart(fig3, use_container_width=True)
-            else:
-                st.warning("병합을 위한 검색어 컬럼이 누락되었습니다.")
-
-        except Exception as e:
-            st.error(f"데이터 처리 중 오류 발생: {e}")
+    q3 = """
+        SELECT s.SRCH_KEYWORD, AVG(d.DWELL_TIME) as avg_dwell
+        FROM DWELL_TIME_LOG d
+        JOIN SEARCH_LOG s ON d.SRCH_ID = s.SRCH_ID
+        WHERE d.DWELL_TIME IS NOT NULL AND d.DWELL_TIME < 1800 -- 30분 이상은 이상치로 간주
+        GROUP BY s.SRCH_KEYWORD
+        HAVING COUNT(d.VIEW_ID) > 2 
+        ORDER BY avg_dwell DESC LIMIT 10
+    """
+    df3 = db_query(q3)
+    if not df3.empty:
+        df3['avg_dwell'] = df3['avg_dwell'].round(1)
+        fig3 = px.bar(df3, x='SRCH_KEYWORD', y='avg_dwell', title='검색어별 평균 체류시간 (초)', text_auto=True, labels={'avg_dwell': '평균 체류시간(초)'})
+        st.plotly_chart(fig3, use_container_width=True)
     else:
         st.info("분석할 체류 시간 데이터가 부족합니다.")
-
-
-
-
 
 # --- 탭 3: 영양성분 계산기 ---
 with tab3:
