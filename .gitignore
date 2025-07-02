@@ -128,7 +128,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -193,7 +192,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-
-active_users.json
-firebase.json
-firebase_config.py
+# Sensitive files - API keys and credentials
+.env
+firebase_key.json
+logs_viewer.py
