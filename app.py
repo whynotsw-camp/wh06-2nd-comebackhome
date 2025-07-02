@@ -263,6 +263,7 @@ with tab2:
 
     st.divider()
     st.subheader("검색어별 평균 레시피 체류시간")
+    st.caption("단위: 초")
     q3 = """
         SELECT s.SRCH_KEYWORD, AVG(d.DWELL_TIME) as avg_dwell
         FROM DWELL_TIME_LOG d
