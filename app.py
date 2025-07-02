@@ -12,7 +12,7 @@ from firebase_admin import credentials, firestore
 
 # 이미 초기화된 경우 건너뛰기
 if not firebase_admin._apps:
-    cred = credentials.Certificate("recipe-app-b1358-firebase-adminsdk-fbsvc-0f01344d78.json")
+    cred = credentials.Certificate("firebase_key.json")
     firebase_admin.initialize_app(cred)
 
 firestore_db = firestore.client()
